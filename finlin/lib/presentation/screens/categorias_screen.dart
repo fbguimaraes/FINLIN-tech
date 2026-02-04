@@ -12,10 +12,7 @@ class CategoriasScreen extends ConsumerWidget {
     final categoriasAsync = ref.watch(categoriasProvider);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Categorias'),
-        elevation: 0,
-      ),
+      appBar: AppBar(title: const Text('Categorias'), elevation: 0),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           showDialog(
@@ -35,9 +32,7 @@ class CategoriasScreen extends ConsumerWidget {
         ),
       ),
       body: categoriasAsync.when(
-        loading: () => const Center(
-          child: CircularProgressIndicator(),
-        ),
+        loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, stackTrace) => Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -73,7 +68,11 @@ class CategoriasScreen extends ConsumerWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.inbox_outlined, size: 48, color: Colors.grey),
+                  const Icon(
+                    Icons.inbox_outlined,
+                    size: 48,
+                    color: Colors.grey,
+                  ),
                   const SizedBox(height: 16),
                   Text(
                     'Nenhuma categoria encontrada',
@@ -92,7 +91,8 @@ class CategoriasScreen extends ConsumerWidget {
               itemCount: categorias.length,
               itemBuilder: (context, index) {
                 final categoria = categorias[index];
-                final cor = categoria.tipo == 'receita' ? Colors.green : Colors.red;
+                final isReceita = categoria.tipo.toString().contains('entrada');
+                final cor = isReceita ? Colors.green : Colors.red;
 
                 return ListTile(
                   leading: Container(
@@ -103,14 +103,12 @@ class CategoriasScreen extends ConsumerWidget {
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
-                      categoria.tipo == 'receita'
-                          ? Icons.arrow_downward
-                          : Icons.arrow_upward,
+                      isReceita ? Icons.arrow_downward : Icons.arrow_upward,
                       color: cor,
                     ),
                   ),
                   title: Text(categoria.nome ?? 'Sem nome'),
-                  subtitle: Text(categoria.tipo?.toString().split('.').last ?? 'Sem tipo'),
+                  subtitle: Text(isReceita ? 'Receita' : 'Saída'),
                   trailing: PopupMenuButton(
                     itemBuilder: (context) => [
                       PopupMenuItem(
@@ -127,7 +125,10 @@ class CategoriasScreen extends ConsumerWidget {
                             builder: (context) => CategoriaDialog(
                               categoriaId: categoria.id?.toString(),
                               nomePadrao: categoria.nome,
-                              tipoPadrao: categoria.tipo?.toString().split('.').last,
+                              tipoPadrao:
+                                  categoria.tipo.toString().contains('entrada')
+                                  ? 'receita'
+                                  : 'despesa',
                             ),
                           ).then((result) {
                             if (result == true) {
@@ -150,7 +151,8 @@ class CategoriasScreen extends ConsumerWidget {
                             builder: (context) => AlertDialog(
                               title: const Text('Confirmar Exclusão'),
                               content: Text(
-                                  'Tem certeza que deseja deletar a categoria "${categoria.nome}"?'),
+                                'Tem certeza que deseja deletar a categoria "${categoria.nome}"?',
+                              ),
                               actions: [
                                 TextButton(
                                   onPressed: () => Navigator.pop(context),
@@ -161,31 +163,35 @@ class CategoriasScreen extends ConsumerWidget {
                                     try {
                                       final apiClient = ApiClientV2();
                                       await apiClient.deleteCategoria(
-                                          categoria.id?.toString() ?? '');
+                                        categoria.id?.toString() ?? '',
+                                      );
                                       Navigator.pop(context);
                                       ref.refresh(categoriasProvider);
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
                                         const SnackBar(
                                           content: Text(
-                                              'Categoria deletada com sucesso'),
+                                            'Categoria deletada com sucesso',
+                                          ),
                                         ),
                                       );
                                     } catch (e) {
                                       Navigator.pop(context);
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content: Text('Erro: $e'),
-                                        ),
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(content: Text('Erro: $e')),
                                       );
                                     }
                                   },
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.red,
                                   ),
-                                  child: const Text('Deletar',
-                                      style: TextStyle(color: Colors.white)),
+                                  child: const Text(
+                                    'Deletar',
+                                    style: TextStyle(color: Colors.white),
+                                  ),
                                 ),
                               ],
                             ),

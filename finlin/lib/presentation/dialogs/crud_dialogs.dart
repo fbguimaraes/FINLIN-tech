@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/datasources/api_client_v2.dart';
 import '../providers/login_provider.dart';
+import '../providers/session_manager.dart';
 
 /// Dialog para criar/editar uma conta
 class ContaDialog extends ConsumerStatefulWidget {
@@ -63,10 +64,9 @@ class _ContaDialogState extends ConsumerState<ContaDialog> {
                 border: OutlineInputBorder(),
               ),
               items: ['corrente', 'poupança', 'investimento']
-                  .map((tipo) => DropdownMenuItem(
-                        value: tipo,
-                        child: Text(tipo),
-                      ))
+                  .map(
+                    (tipo) => DropdownMenuItem(value: tipo, child: Text(tipo)),
+                  )
                   .toList(),
               onChanged: (valor) {
                 setState(() {
@@ -84,7 +84,13 @@ class _ContaDialogState extends ConsumerState<ContaDialog> {
         ),
         ElevatedButton(
           onPressed: isLoading ? null : _salvar,
-          child: isLoading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Salvar'),
+          child: isLoading
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Salvar'),
         ),
       ],
     );
@@ -92,9 +98,9 @@ class _ContaDialogState extends ConsumerState<ContaDialog> {
 
   Future<void> _salvar() async {
     if (nomeController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nome é obrigatório')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Nome é obrigatório')));
       return;
     }
 
@@ -113,12 +119,16 @@ class _ContaDialogState extends ConsumerState<ContaDialog> {
           tipoSelecionado ?? 'corrente',
           idUsuario: userId,
         );
+        // 🔄 Invalidar dados após criar conta
+        await AutoRefreshHelper.afterContaCreated(ref);
       } else {
         await apiClient.updateConta(
           widget.contaId!,
           nome: nomeController.text,
           tipo: tipoSelecionado,
         );
+        // 🔄 Invalidar dados após atualizar conta
+        await AutoRefreshHelper.afterContaCreated(ref);
       }
 
       if (mounted) {
@@ -126,9 +136,9 @@ class _ContaDialogState extends ConsumerState<ContaDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erro: $e')));
       }
     } finally {
       if (mounted) {
@@ -170,14 +180,40 @@ class _TransacaoDialogState extends ConsumerState<TransacaoDialog> {
   dynamic categoriaSelecionada;
   bool isLoading = false;
 
+  /// Filtra categorias baseado no tipo selecionado
+  List<dynamic> _filtrarCategorias(String tipo) {
+    return widget.categorias.where((cat) {
+      final tipoCategoria = cat.tipo.toString();
+      if (tipo == 'receita') {
+        return tipoCategoria.contains('entrada');
+      } else {
+        return tipoCategoria.contains('saida');
+      }
+    }).toList();
+  }
+
   @override
   void initState() {
     super.initState();
-    descricaoController = TextEditingController(text: widget.descricaoPadrao ?? '');
-    valorController = TextEditingController(text: widget.valorPadrao?.toString() ?? '0.00');
-    tipoSelecionado = widget.tipoPadrao ?? 'despesa';
+    descricaoController = TextEditingController(
+      text: widget.descricaoPadrao ?? '',
+    );
+    valorController = TextEditingController(
+      text: widget.valorPadrao?.toString() ?? '0.00',
+    );
     if (widget.categorias.isNotEmpty) {
       categoriaSelecionada = widget.categorias.first;
+      // 🔄 Sincronizar tipo com a categoria padrão
+      if (categoriaSelecionada != null && categoriaSelecionada.tipo != null) {
+        final tipoCategoria = categoriaSelecionada.tipo.toString();
+        tipoSelecionado = tipoCategoria.contains('entrada')
+            ? 'receita'
+            : 'despesa';
+      } else {
+        tipoSelecionado = widget.tipoPadrao ?? 'despesa';
+      }
+    } else {
+      tipoSelecionado = widget.tipoPadrao ?? 'despesa';
     }
   }
 
@@ -191,7 +227,9 @@ class _TransacaoDialogState extends ConsumerState<TransacaoDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.transacaoId == null ? 'Nova Transação' : 'Editar Transação'),
+      title: Text(
+        widget.transacaoId == null ? 'Nova Transação' : 'Editar Transação',
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -220,14 +258,20 @@ class _TransacaoDialogState extends ConsumerState<TransacaoDialog> {
                 border: OutlineInputBorder(),
               ),
               items: ['receita', 'despesa']
-                  .map((tipo) => DropdownMenuItem(
-                        value: tipo,
-                        child: Text(tipo),
-                      ))
+                  .map(
+                    (tipo) => DropdownMenuItem(value: tipo, child: Text(tipo)),
+                  )
                   .toList(),
               onChanged: (valor) {
                 setState(() {
                   tipoSelecionado = valor;
+                  // 🔄 Filtrar categorias disponíveis para o novo tipo
+                  final categoriasDoTipo = _filtrarCategorias(valor!);
+                  if (categoriasDoTipo.isNotEmpty) {
+                    categoriaSelecionada = categoriasDoTipo.first;
+                  } else {
+                    categoriaSelecionada = null;
+                  }
                 });
               },
             ),
@@ -238,15 +282,24 @@ class _TransacaoDialogState extends ConsumerState<TransacaoDialog> {
                 labelText: 'Categoria',
                 border: OutlineInputBorder(),
               ),
-              items: widget.categorias
-                  .map((cat) => DropdownMenuItem(
-                        value: cat,
-                        child: Text(cat.nome ?? 'Sem nome'),
-                      ))
+              items: _filtrarCategorias(tipoSelecionado!)
+                  .map(
+                    (cat) => DropdownMenuItem(
+                      value: cat,
+                      child: Text(cat.nome ?? 'Sem nome'),
+                    ),
+                  )
                   .toList(),
               onChanged: (valor) {
                 setState(() {
                   categoriaSelecionada = valor;
+                  // 🔄 Sincronizar tipo de transação com o tipo da categoria
+                  if (valor != null && valor.tipo != null) {
+                    final tipoCategoria = valor.tipo.toString();
+                    tipoSelecionado = tipoCategoria.contains('entrada')
+                        ? 'receita'
+                        : 'despesa';
+                  }
                 });
               },
             ),
@@ -260,7 +313,13 @@ class _TransacaoDialogState extends ConsumerState<TransacaoDialog> {
         ),
         ElevatedButton(
           onPressed: isLoading ? null : _salvar,
-          child: isLoading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Salvar'),
+          child: isLoading
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Salvar'),
         ),
       ],
     );
@@ -268,9 +327,9 @@ class _TransacaoDialogState extends ConsumerState<TransacaoDialog> {
 
   Future<void> _salvar() async {
     if (descricaoController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Descrição é obrigatória')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Descrição é obrigatória')));
       return;
     }
 
@@ -281,7 +340,8 @@ class _TransacaoDialogState extends ConsumerState<TransacaoDialog> {
     try {
       final apiClient = ApiClientV2();
       final valor = double.parse(valorController.text);
-      final idCategoria = categoriaSelecionada.id ?? categoriaSelecionada.id_categoria;
+      final idCategoria =
+          categoriaSelecionada.id ?? categoriaSelecionada.id_categoria;
 
       if (widget.transacaoId == null) {
         await apiClient.createTransacao(
@@ -292,6 +352,8 @@ class _TransacaoDialogState extends ConsumerState<TransacaoDialog> {
           descricaoController.text,
           DateTime.now().toIso8601String().split('T')[0],
         );
+        // 🔄 Invalidar dados após criar transação
+        await AutoRefreshHelper.afterTransacaoCreated(ref);
       } else {
         await apiClient.updateTransacao(
           widget.transacaoId!,
@@ -299,6 +361,8 @@ class _TransacaoDialogState extends ConsumerState<TransacaoDialog> {
           tipo: tipoSelecionado,
           descricao: descricaoController.text,
         );
+        // 🔄 Invalidar dados após atualizar transação
+        await AutoRefreshHelper.afterTransacaoCreated(ref);
       }
 
       if (mounted) {
@@ -306,9 +370,9 @@ class _TransacaoDialogState extends ConsumerState<TransacaoDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erro: $e')));
       }
     } finally {
       if (mounted) {
@@ -339,14 +403,14 @@ class CategoriaDialog extends ConsumerStatefulWidget {
 
 class _CategoriaDialogState extends ConsumerState<CategoriaDialog> {
   late TextEditingController nomeController;
-  String? tipoSelecionado;
+  String tipoSelecionado = 'receita';
   bool isLoading = false;
 
   @override
   void initState() {
     super.initState();
     nomeController = TextEditingController(text: widget.nomePadrao ?? '');
-    tipoSelecionado = widget.tipoPadrao ?? 'despesa';
+    tipoSelecionado = widget.tipoPadrao ?? 'receita';
   }
 
   @override
@@ -358,7 +422,9 @@ class _CategoriaDialogState extends ConsumerState<CategoriaDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.categoriaId == null ? 'Nova Categoria' : 'Editar Categoria'),
+      title: Text(
+        widget.categoriaId == null ? 'Nova Categoria' : 'Editar Categoria',
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -378,14 +444,13 @@ class _CategoriaDialogState extends ConsumerState<CategoriaDialog> {
                 border: OutlineInputBorder(),
               ),
               items: ['receita', 'despesa']
-                  .map((tipo) => DropdownMenuItem(
-                        value: tipo,
-                        child: Text(tipo),
-                      ))
+                  .map(
+                    (tipo) => DropdownMenuItem(value: tipo, child: Text(tipo)),
+                  )
                   .toList(),
               onChanged: (valor) {
                 setState(() {
-                  tipoSelecionado = valor;
+                  tipoSelecionado = valor ?? 'receita';
                 });
               },
             ),
@@ -399,7 +464,13 @@ class _CategoriaDialogState extends ConsumerState<CategoriaDialog> {
         ),
         ElevatedButton(
           onPressed: isLoading ? null : _salvar,
-          child: isLoading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Salvar'),
+          child: isLoading
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Salvar'),
         ),
       ],
     );
@@ -407,9 +478,9 @@ class _CategoriaDialogState extends ConsumerState<CategoriaDialog> {
 
   Future<void> _salvar() async {
     if (nomeController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nome é obrigatório')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Nome é obrigatório')));
       return;
     }
 
@@ -424,15 +495,19 @@ class _CategoriaDialogState extends ConsumerState<CategoriaDialog> {
       if (widget.categoriaId == null) {
         await apiClient.createCategoria(
           nomeController.text,
-          tipoSelecionado ?? 'despesa',
+          tipoSelecionado,
           idUsuario: userId,
         );
+        // 🔄 Invalidar dados após criar categoria
+        await AutoRefreshHelper.afterCategoriaCreated(ref);
       } else {
         await apiClient.updateCategoria(
           widget.categoriaId!,
           nome: nomeController.text,
           tipo: tipoSelecionado,
         );
+        // 🔄 Invalidar dados após atualizar categoria
+        await AutoRefreshHelper.afterCategoriaCreated(ref);
       }
 
       if (mounted) {
@@ -440,9 +515,9 @@ class _CategoriaDialogState extends ConsumerState<CategoriaDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erro: $e')));
       }
     } finally {
       if (mounted) {

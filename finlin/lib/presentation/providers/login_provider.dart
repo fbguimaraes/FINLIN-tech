@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/entities/usuario.dart';
 import '../../data/datasources/api_client_v2.dart';
 import '../../data/models/usuario_model.dart';
+import 'session_manager.dart';
 
 // ============ INSTÂNCIA GLOBAL DO API CLIENT ============
 // Singleton que é reutilizado em todos os providers
@@ -16,17 +17,9 @@ class LoginState {
   final Usuario? usuario;
   final String? error;
 
-  LoginState({
-    this.isLoading = false,
-    this.usuario,
-    this.error,
-  });
+  LoginState({this.isLoading = false, this.usuario, this.error});
 
-  LoginState copyWith({
-    bool? isLoading,
-    Usuario? usuario,
-    String? error,
-  }) {
+  LoginState copyWith({bool? isLoading, Usuario? usuario, String? error}) {
     return LoginState(
       isLoading: isLoading ?? this.isLoading,
       usuario: usuario ?? this.usuario,
@@ -51,13 +44,20 @@ class LoginNotifier extends StateNotifier<LoginState> {
       // 1. Fazer login e obter token
       await apiClient.login(email, senha);
 
-      // 2. Buscar dados do usuário
+      // 2. Salvar token na sessão
+      if (apiClient.authToken != null) {
+        final sessionManager = SessionManager();
+        await sessionManager.initialize();
+        await sessionManager.saveAuthToken(apiClient.authToken!);
+      }
+
+      // 3. Buscar dados do usuário
       final usuarioData = await apiClient.getUsuarioAtual();
 
-      // 3. Converter para model
+      // 4. Converter para model
       final usuario = UsuarioModel.fromJson(usuarioData);
 
-      // 4. Atualizar estado
+      // 5. Atualizar estado
       state = LoginState(usuario: usuario);
       print('✅ Login concluído com sucesso!');
     } catch (e) {
@@ -70,6 +70,9 @@ class LoginNotifier extends StateNotifier<LoginState> {
   /// Faz logout
   void logout() {
     apiClient.logout();
+    final sessionManager = SessionManager();
+    // Não precisa de await aqui, mas idealmente seria async
+    sessionManager.clearSession();
     state = LoginState();
     print('🚪 Logout realizado');
   }

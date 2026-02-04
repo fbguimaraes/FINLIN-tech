@@ -14,7 +14,10 @@ class CategoriaModel extends Categoria {
   /// Factory para criar CategoriaModel a partir de JSON da API
   factory CategoriaModel.fromJson(Map<String, dynamic> json) {
     final tipoStr = (json['tipo'] as String?)?.toLowerCase() ?? 'receita';
-    final tipo = tipoStr == 'entrada' ? TipoCategoria.entrada : TipoCategoria.saida;
+    // Mapear tanto 'entrada'/'receita' quanto 'saida'/'despesa'
+    final tipo = (tipoStr == 'entrada' || tipoStr == 'receita')
+        ? TipoCategoria.entrada
+        : TipoCategoria.saida;
 
     return CategoriaModel(
       id: json['id_categoria']?.toString() ?? json['id'].toString() ?? '',

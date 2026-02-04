@@ -355,6 +355,21 @@ async def criar_transacao(
         if categoria_result["data"]["id_usuario"] != user_id:
             JSONResponse.raise_forbidden()
         
+        # ✅ VALIDAR: Tipo da transação deve corresponder ao tipo da categoria
+        tipo_categoria = categoria_result["data"]["tipo"].lower()
+        tipo_transacao = transacao_data.tipo.lower()
+        
+        # Mapear: 'receita' da transação deve corresponder a categoria 'receita'
+        # 'despesa' da transação deve corresponder a categoria 'despesa'
+        if tipo_transacao != tipo_categoria:
+            raise HTTPException(
+                status_code=400, 
+                detail=JSONResponse.error(
+                    "Erro ao criar transação (400)",
+                    f"Tipo da transacao ({tipo_transacao}) não corresponde ao tipo da categoria ({tipo_categoria})"
+                )
+            )
+        
         # Criar transação
         nova_transacao = Transacao(
             valor=transacao_data.valor,

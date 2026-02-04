@@ -4,6 +4,7 @@ import '../providers/login_provider.dart';
 import '../providers/contas_provider_v2.dart';
 import '../providers/transacoes_provider_v2.dart';
 import '../providers/categorias_provider_v2.dart';
+import '../providers/session_manager.dart';
 import '../widgets/common_widgets.dart';
 import '../dialogs/crud_dialogs.dart';
 import '../../data/datasources/api_client_v2.dart';
@@ -28,6 +29,9 @@ class _HomeScreenV2State extends ConsumerState<HomeScreenV2> {
     final contasAsync = ref.watch(contasProvider);
     final transacoesAsync = ref.watch(transacoesProvider);
 
+    // 🔄 Observar invalidações de dados
+    ref.watch(dataRefreshNotifierProvider);
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Olá, ${loginState.usuario?.nome ?? 'Usuário'}'),
@@ -35,8 +39,12 @@ class _HomeScreenV2State extends ConsumerState<HomeScreenV2> {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () {
-              ref.read(loginProvider.notifier).logout();
+            onPressed: () async {
+              // 🔄 Invalidar dados antes de fazer logout
+              await AutoRefreshHelper.afterLogout(ref);
+              if (mounted) {
+                ref.read(loginProvider.notifier).logout();
+              }
             },
           ),
         ],
@@ -100,14 +108,16 @@ class _HomeScreenV2State extends ConsumerState<HomeScreenV2> {
                           margin: const EdgeInsets.only(bottom: 12),
                           child: ListTile(
                             onTap: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      TransacoesScreen(conta: conta),
-                                ),
-                              ).then((_) {
-                                setState(() => _selectedIndex = 0);
-                              });
+                              Navigator.of(context)
+                                  .push(
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          TransacoesScreen(conta: conta),
+                                    ),
+                                  )
+                                  .then((_) {
+                                    setState(() => _selectedIndex = 0);
+                                  });
                             },
                             leading: const Icon(Icons.account_balance_wallet),
                             title: Text(conta.nome),
@@ -152,7 +162,8 @@ class _HomeScreenV2State extends ConsumerState<HomeScreenV2> {
                                       builder: (context) => AlertDialog(
                                         title: const Text('Confirmar Exclusão'),
                                         content: Text(
-                                            'Tem certeza que deseja deletar a conta "${conta.nome}"?'),
+                                          'Tem certeza que deseja deletar a conta "${conta.nome}"?',
+                                        ),
                                         actions: [
                                           TextButton(
                                             onPressed: () =>
@@ -162,23 +173,26 @@ class _HomeScreenV2State extends ConsumerState<HomeScreenV2> {
                                           ElevatedButton(
                                             onPressed: () async {
                                               try {
-                                                final apiClient =
-                                                    ApiClientV2();
+                                                final apiClient = ApiClientV2();
                                                 await apiClient.deleteConta(
-                                                    conta.id?.toString() ?? '');
+                                                  conta.id?.toString() ?? '',
+                                                );
                                                 Navigator.pop(context);
                                                 ref.refresh(contasProvider);
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(
                                                   const SnackBar(
                                                     content: Text(
-                                                        'Conta deletada com sucesso'),
+                                                      'Conta deletada com sucesso',
+                                                    ),
                                                   ),
                                                 );
                                               } catch (e) {
                                                 Navigator.pop(context);
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(
                                                   SnackBar(
                                                     content: Text('Erro: $e'),
                                                   ),
@@ -188,9 +202,12 @@ class _HomeScreenV2State extends ConsumerState<HomeScreenV2> {
                                             style: ElevatedButton.styleFrom(
                                               backgroundColor: Colors.red,
                                             ),
-                                            child: const Text('Deletar',
-                                                style: TextStyle(
-                                                    color: Colors.white)),
+                                            child: const Text(
+                                              'Deletar',
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                              ),
+                                            ),
                                           ),
                                         ],
                                       ),
@@ -229,8 +246,7 @@ class _HomeScreenV2State extends ConsumerState<HomeScreenV2> {
                       onPressed: () {
                         Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (context) =>
-                                const TodasTransacoesScreen(),
+                            builder: (context) => const TodasTransacoesScreen(),
                           ),
                         );
                       },
@@ -279,7 +295,8 @@ class _HomeScreenV2State extends ConsumerState<HomeScreenV2> {
                       itemCount: recentes.length,
                       itemBuilder: (context, index) {
                         final transacao = recentes[index];
-                        final isReceita = transacao.tipo == TipoTransacao.entrada;
+                        final isReceita =
+                            transacao.tipo == TipoTransacao.entrada;
 
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
@@ -326,10 +343,7 @@ class _HomeScreenV2State extends ConsumerState<HomeScreenV2> {
         icon: const Icon(Icons.add, color: Colors.white),
         label: const Text(
           'Nova Conta',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -340,10 +354,7 @@ class _HomeScreenV2State extends ConsumerState<HomeScreenV2> {
         unselectedItemColor: Colors.grey,
         elevation: 8,
         items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Home',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(
             icon: Icon(Icons.swap_horiz),
             label: 'Transações',
@@ -361,20 +372,22 @@ class _HomeScreenV2State extends ConsumerState<HomeScreenV2> {
           setState(() {
             _selectedIndex = index;
           });
-          
+
           if (index == 0) {
             // Já está em Home
             return;
           } else if (index == 1) {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => const TodasTransacoesScreen(),
-              ),
-            ).then((_) {
-              setState(() {
-                _selectedIndex = 0;
-              });
-            });
+            Navigator.of(context)
+                .push(
+                  MaterialPageRoute(
+                    builder: (context) => const TodasTransacoesScreen(),
+                  ),
+                )
+                .then((_) {
+                  setState(() {
+                    _selectedIndex = 0;
+                  });
+                });
           } else if (index == 2) {
             Navigator.of(context).pushNamed('/categorias').then((_) {
               setState(() {

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/contas_provider_v2.dart';
-import '../providers/transacoes_provider_v2.dart';
+import '../providers/relatorio_provider.dart';
+import '../providers/session_manager.dart';
 import '../widgets/common_widgets.dart';
 import '../../domain/entities/transacao.dart';
 
@@ -75,246 +76,254 @@ class _RelatorioScreenState extends ConsumerState<RelatorioScreen> {
   @override
   Widget build(BuildContext context) {
     final contasAsync = ref.watch(contasProvider);
-    final transacoesAsync = ref.watch(transacoesProvider);
+
+    // 🔄 Observar invalidações de dados para atualizar em tempo real
+    ref.watch(dataRefreshNotifierProvider);
+
+    // Usar novo provider de relatório
+    final resumoAsync = ref.watch(
+      resumoMesContaProvider((_mesAtual, _anoAtual, _contaSelecionadaId ?? '')),
+    );
 
     return Scaffold(
-      appBar: AppBar(title: const Text('RelatÃ³rio Mensal')),
-      body: Column(
-        children: [
-          // Seletor de mÃªs
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.chevron_left),
-                      onPressed: _mesPrevio,
-                    ),
-                    Text(
-                      '${_getNomeMes(_mesAtual)} $_anoAtual',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.chevron_right),
-                      onPressed: _proximoMes,
-                    ),
-                  ],
+      appBar: AppBar(title: const Text('Relatório Mensal')),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          // Recarregar dados ao fazer pull-to-refresh
+          await ref.refresh(contasProvider.future);
+          await ref.refresh(
+            resumoMesContaProvider((
+              _mesAtual,
+              _anoAtual,
+              _contaSelecionadaId ?? '',
+            )).future,
+          );
+        },
+        child: Column(
+          children: [
+            // Seletor de mÃªs
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.chevron_left),
+                        onPressed: _mesPrevio,
+                      ),
+                      Text(
+                        '${_getNomeMes(_mesAtual)} $_anoAtual',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.chevron_right),
+                        onPressed: _proximoMes,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
 
-          // ConteÃºdo do relatÃ³rio
-          Expanded(
-            child: contasAsync.when(
-              loading: () =>
-                  const LoadingWidget(mensagem: 'Carregando contas...'),
-              error: (err, stack) => ErroWidget(
-                mensagem: 'Erro ao carregar contas',
-                onRetry: () => ref.refresh(contasProvider),
-              ),
-              data: (contas) {
-                if (contas.isEmpty) {
-                  return const Center(
-                    child: Text('Nenhuma conta encontrada'),
-                  );
-                }
+            // ConteÃºdo do relatÃ³rio
+            Expanded(
+              child: contasAsync.when(
+                loading: () =>
+                    const LoadingWidget(mensagem: 'Carregando contas...'),
+                error: (err, stack) => ErroWidget(
+                  mensagem: 'Erro ao carregar contas',
+                  onRetry: () => ref.refresh(contasProvider),
+                ),
+                data: (contas) {
+                  if (contas.isEmpty) {
+                    return const Center(
+                      child: Text('Nenhuma conta encontrada'),
+                    );
+                  }
 
-                _contaSelecionadaId ??= contas.first.id;
+                  _contaSelecionadaId ??= contas.first.id;
 
-                return transacoesAsync.when(
-                  loading: () => const LoadingWidget(
-                    mensagem: 'Carregando transaÃ§Ãµes...',
-                  ),
-                  error: (err, stack) => ErroWidget(
-                    mensagem: 'Erro ao carregar transaÃ§Ãµes',
-                    onRetry: () => ref.refresh(transacoesProvider),
-                  ),
-                  data: (transacoes) {
-                    final contaId = _contaSelecionadaId!;
-                    final transacoesMes = transacoes.where((t) {
-                      return t.contaId == contaId &&
-                          t.data.month == _mesAtual &&
-                          t.data.year == _anoAtual;
-                    }).toList();
-
-                    double totalEntrada = 0.0;
-                    double totalSaida = 0.0;
-
-                    for (final t in transacoesMes) {
-                      if (t.tipo == TipoTransacao.entrada) {
-                        totalEntrada += t.valor;
-                      } else {
-                        totalSaida += t.valor;
-                      }
-                    }
-
-                    final saldo = totalEntrada - totalSaida;
-
-                    return SingleChildScrollView(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          children: [
-                            // Seletor de conta
-                            Row(
-                              children: [
-                                const Icon(Icons.account_balance_wallet),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: DropdownButtonFormField<String>(
-                                    value: _contaSelecionadaId,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Conta',
-                                      border: OutlineInputBorder(),
+                  return resumoAsync.when(
+                    loading: () => const LoadingWidget(
+                      mensagem: 'Carregando relatório...',
+                    ),
+                    error: (err, stack) => ErroWidget(
+                      mensagem: 'Erro ao carregar relatório',
+                      onRetry: () => ref.refresh(
+                        resumoMesContaProvider((
+                          _mesAtual,
+                          _anoAtual,
+                          _contaSelecionadaId ?? '',
+                        )),
+                      ),
+                    ),
+                    data: (resumo) {
+                      return SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              // Seletor de conta
+                              Row(
+                                children: [
+                                  const Icon(Icons.account_balance_wallet),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: DropdownButtonFormField<String>(
+                                      value: _contaSelecionadaId,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Conta',
+                                        border: OutlineInputBorder(),
+                                      ),
+                                      items: contas
+                                          .map(
+                                            (conta) => DropdownMenuItem(
+                                              value: conta.id,
+                                              child: Text(conta.nome),
+                                            ),
+                                          )
+                                          .toList(),
+                                      onChanged: (valor) {
+                                        setState(() {
+                                          _contaSelecionadaId = valor;
+                                        });
+                                      },
                                     ),
-                                    items: contas
-                                        .map(
-                                          (conta) => DropdownMenuItem(
-                                            value: conta.id,
-                                            child: Text(conta.nome),
-                                          ),
-                                        )
-                                        .toList(),
-                                    onChanged: (valor) {
-                                      setState(() {
-                                        _contaSelecionadaId = valor;
-                                      });
-                                    },
                                   ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 16),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
 
-                            // Cards de resumo
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                              children: [
-                                // Card de Entradas
-                                Expanded(
-                                  child: Card(
-                                    color: Colors.green.shade50,
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(16),
-                                      child: Column(
-                                        children: [
-                                          const Icon(
-                                            Icons.arrow_downward,
-                                            color: Colors.green,
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Text(
-                                            'Entradas',
-                                            style: Theme.of(
-                                              context,
-                                            ).textTheme.bodySmall,
-                                          ),
-                                          const SizedBox(height: 8),
-                                          MoedaWidget(
-                                            valor: totalEntrada,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
+                              // Cards de resumo
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceEvenly,
+                                children: [
+                                  // Card de Entradas
+                                  Expanded(
+                                    child: Card(
+                                      color: Colors.green.shade50,
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(16),
+                                        child: Column(
+                                          children: [
+                                            const Icon(
+                                              Icons.arrow_downward,
                                               color: Colors.green,
                                             ),
-                                          ),
-                                        ],
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              'Entradas',
+                                              style: Theme.of(
+                                                context,
+                                              ).textTheme.bodySmall,
+                                            ),
+                                            const SizedBox(height: 8),
+                                            MoedaWidget(
+                                              valor: resumo.totalEntrada,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.green,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                                const SizedBox(width: 12),
-                                // Card de SaÃ­das
-                                Expanded(
-                                  child: Card(
-                                    color: Colors.red.shade50,
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(16),
-                                      child: Column(
-                                        children: [
-                                          const Icon(
-                                            Icons.arrow_upward,
-                                            color: Colors.red,
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Text(
-                                            'SaÃ­das',
-                                            style: Theme.of(
-                                              context,
-                                            ).textTheme.bodySmall,
-                                          ),
-                                          const SizedBox(height: 8),
-                                          MoedaWidget(
-                                            valor: totalSaida,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
+                                  const SizedBox(width: 12),
+                                  // Card de SaÃ­das
+                                  Expanded(
+                                    child: Card(
+                                      color: Colors.red.shade50,
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(16),
+                                        child: Column(
+                                          children: [
+                                            const Icon(
+                                              Icons.arrow_upward,
                                               color: Colors.red,
                                             ),
-                                          ),
-                                        ],
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              'SaÃ­das',
+                                              style: Theme.of(
+                                                context,
+                                              ).textTheme.bodySmall,
+                                            ),
+                                            const SizedBox(height: 8),
+                                            MoedaWidget(
+                                              valor: resumo.totalSaida,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.red,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+
+                              // Card de Saldo
+                              SaldoWidget(valor: resumo.saldo),
+                              const SizedBox(height: 24),
+
+                              // GrÃ¡fico simples
+                              _ResumoBarChart(
+                                totalEntrada: resumo.totalEntrada,
+                                totalSaida: resumo.totalSaida,
+                              ),
+                              const SizedBox(height: 32),
+
+                              // TransaÃ§Ãµes do mÃªs
+                              if (resumo.transacoes.isNotEmpty) ...[
+                                Text(
+                                  'TransaÃ§Ãµes do mÃªs',
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.titleMedium,
                                 ),
-                              ],
-                            ),
-                            const SizedBox(height: 16),
+                                const SizedBox(height: 12),
+                                ListView.builder(
+                                  shrinkWrap: true,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  itemCount: resumo.transacoes.length,
+                                  itemBuilder: (context, index) {
+                                    final transacao = resumo.transacoes[index];
+                                    final isEntrada =
+                                        transacao.tipo == TipoTransacao.entrada;
 
-                            // Card de Saldo
-                            SaldoWidget(valor: saldo),
-                            const SizedBox(height: 24),
-
-                            // GrÃ¡fico simples
-                            _ResumoBarChart(
-                              totalEntrada: totalEntrada,
-                              totalSaida: totalSaida,
-                            ),
-                            const SizedBox(height: 32),
-
-                            // TransaÃ§Ãµes do mÃªs
-                            if (transacoesMes.isNotEmpty) ...[
-                              Text(
-                                'TransaÃ§Ãµes do mÃªs',
-                                style:
-                                    Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 12),
-                              ListView.builder(
-                                shrinkWrap: true,
-                                physics:
-                                    const NeverScrollableScrollPhysics(),
-                                itemCount: transacoesMes.length,
-                                itemBuilder: (context, index) {
-                                  final transacao = transacoesMes[index];
-                                  final isEntrada =
-                                      transacao.tipo == TipoTransacao.entrada;
-
-                                  return TransacaoItemWidget(
-                                    descricao: transacao.descricao,
-                                    valor: transacao.valor,
-                                    isEntrada: isEntrada,
-                                  );
-                                },
-                              ),
-                            ] else
-                              Text(
-                                'Nenhuma transaÃ§Ã£o neste mÃªs',
-                                style: Theme.of(context).textTheme.bodyMedium,
-                              ),
-                          ],
+                                    return TransacaoItemWidget(
+                                      descricao: transacao.descricao,
+                                      valor: transacao.valor,
+                                      isEntrada: isEntrada,
+                                    );
+                                  },
+                                ),
+                              ] else
+                                Text(
+                                  'Nenhuma transaÃ§Ã£o neste mÃªs',
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                );
-              },
+                      );
+                    },
+                  );
+                },
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -324,10 +333,7 @@ class _ResumoBarChart extends StatelessWidget {
   final double totalEntrada;
   final double totalSaida;
 
-  const _ResumoBarChart({
-    required this.totalEntrada,
-    required this.totalSaida,
-  });
+  const _ResumoBarChart({required this.totalEntrada, required this.totalSaida});
 
   @override
   Widget build(BuildContext context) {
